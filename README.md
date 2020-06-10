@@ -27,3 +27,4 @@ ToDo:
 6. Include HA setup
 7. Include Active Directory & Domain Controller creation
 8. Include integration between components
+9. Include Automated bash script to switch between deployments
