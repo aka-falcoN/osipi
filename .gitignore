@@ -4,7 +4,7 @@
 # .tfstate files
 *.tfstate
 *.tfstate.*
-
+service_account.json
 # Crash log files
 crash.log
 

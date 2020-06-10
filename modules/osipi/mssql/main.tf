@@ -1,8 +1,8 @@
 /******************************************
-	OSIPI Integrator VM
+	OSIPI MSSQL VM
  *****************************************/
 
-module "osipi-mssql-vm" {
+module "osipi_mssql_vm" {
   source     = "../../terraform/compute_engine"
   project_id = var.project_id
   region     = var.region

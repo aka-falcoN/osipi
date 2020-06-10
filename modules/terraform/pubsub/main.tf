@@ -1,5 +1,5 @@
 /**
- * Copyright 2018 Google LLC
+ * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,68 +15,99 @@
  */
 
 locals {
-  default_ack_deadline_seconds = 10
+  iam_pairs = var.subscription_iam_roles == null ? [] : flatten([
+    for name, roles in var.subscription_iam_roles :
+    [for role in roles : { name = name, role = role }]
+  ])
+  iam_keypairs = {
+    for pair in local.iam_pairs :
+    "${pair.name}-${pair.role}" => pair
+  }
+  iam_members = (
+    var.subscription_iam_members == null ? {} : var.subscription_iam_members
+  )
+  oidc_config = {
+    for k, v in var.push_configs : k => v.oidc_token
+  }
+  subscriptions = {
+    for k, v in var.subscriptions : k => {
+      labels  = try(v.labels, v, null) == null ? var.labels : v.labels
+      options = try(v.options, v, null) == null ? var.defaults : v.options
+    }
+  }
 }
 
-resource "google_pubsub_topic" "topic" {
-  count        = var.create_topic ? 1 : 0
+resource "google_pubsub_topic" "default" {
   project      = var.project_id
-  name         = var.topic
-  labels       = var.topic_labels
-  kms_key_name = var.topic_kms_key_name
+  name         = var.name
+  kms_key_name = var.kms_key
+  labels       = var.labels
 
-  dynamic "message_storage_policy" {
-    for_each = var.message_storage_policy
+  dynamic message_storage_policy {
+    for_each = length(var.regions) > 0 ? [var.regions] : []
     content {
-      allowed_persistence_regions = message_storage_policy.key == "allowed_persistence_regions" ? message_storage_policy.value : null
+      allowed_persistence_regions = var.regions
     }
   }
 }
 
-resource "google_pubsub_subscription" "push_subscriptions" {
-  count   = var.create_topic ? length(var.push_subscriptions) : 0
-  name    = var.push_subscriptions[count.index].name
-  topic   = google_pubsub_topic.topic.0.name
-  project = var.project_id
-  ack_deadline_seconds = lookup(
-    var.push_subscriptions[count.index],
-    "ack_deadline_seconds",
-    local.default_ack_deadline_seconds,
-  )
-  message_retention_duration = lookup(
-    var.push_subscriptions[count.index],
-    "message_retention_duration",
-    null,
-  )
+resource "google_pubsub_topic_iam_binding" "default" {
+  for_each = toset(var.iam_roles)
+  project  = var.project_id
+  topic    = google_pubsub_topic.default.name
+  role     = each.value
+  members  = lookup(var.iam_members, each.value, [])
+}
 
-  push_config {
-    push_endpoint = var.push_subscriptions[count.index]["push_endpoint"]
+resource "google_pubsub_subscription" "default" {
+  for_each                   = local.subscriptions
+  project                    = var.project_id
+  name                       = each.key
+  topic                      = google_pubsub_topic.default.name
+  labels                     = each.value.labels
+  ack_deadline_seconds       = each.value.options.ack_deadline_seconds
+  message_retention_duration = each.value.options.message_retention_duration
+  retain_acked_messages      = each.value.options.retain_acked_messages
 
-    // FIXME: This should be programmable, but nested map isn't supported at this time.
-    //   https://github.com/hashicorp/terraform/issues/2114
-    attributes = {
-      x-goog-version = lookup(var.push_subscriptions[count.index], "x-goog-version", "v1")
+  dynamic expiration_policy {
+    for_each = each.value.options.expiration_policy_ttl == null ? [] : [""]
+    content {
+      ttl = each.value.options.expiration_policy_ttl
     }
   }
 
-  depends_on = [google_pubsub_topic.topic]
+  dynamic dead_letter_policy {
+    for_each = try(var.dead_letter_configs[each.key], null) == null ? [] : [""]
+    content {
+      dead_letter_topic     = var.dead_letter_configs[each.key].topic
+      max_delivery_attempts = var.dead_letter_configs[each.key].max_delivery_attempts
+    }
+  }
+
+  dynamic push_config {
+    for_each = try(var.push_configs[each.key], null) == null ? [] : [""]
+    content {
+      push_endpoint = var.push_configs[each.key].endpoint
+      attributes    = var.push_configs[each.key].attributes
+      dynamic oidc_token {
+        for_each = (
+          local.oidc_config[each.key] == null ? [] : [""]
+        )
+        content {
+          service_account_email = local.oidc_config[each.key].service_account_email
+          audience              = local.oidc_config[each.key].audience
+        }
+      }
+    }
+  }
 }
 
-resource "google_pubsub_subscription" "pull_subscriptions" {
-  count   = var.create_topic ? length(var.pull_subscriptions) : 0
-  name    = var.pull_subscriptions[count.index].name
-  topic   = google_pubsub_topic.topic.0.name
-  project = var.project_id
-  ack_deadline_seconds = lookup(
-    var.pull_subscriptions[count.index],
-    "ack_deadline_seconds",
-    local.default_ack_deadline_seconds,
+resource "google_pubsub_subscription_iam_binding" "default" {
+  for_each     = local.iam_keypairs
+  project      = var.project_id
+  subscription = google_pubsub_subscription.default[each.value.name].name
+  role         = each.value.role
+  members = lookup(
+    lookup(local.iam_members, each.value.name, {}), each.value.role, []
   )
-  message_retention_duration = lookup(
-    var.pull_subscriptions[count.index],
-    "message_retention_duration",
-    null,
-  )
-
-  depends_on = [google_pubsub_topic.topic]
 }

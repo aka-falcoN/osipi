@@ -45,8 +45,25 @@ resource "google_compute_subnetwork" "subnet" {
   region                   = var.region
 }
 
-//Invoke OSI SERVER, Integrator, MSSQL MODULE and pass service account id to pubsub and bigquery
+module "osipi_server" {
+  source     = "../modules/osipi/server"
 
+  project_id= var.project_id
+  region = var.region
+  zone =var.zone
+  network_self_link=google_compute_network.vpc.self_link
+  subnet_self_link=google_compute_subnetwork.subnet.self_link
+}
+
+module "osipi_integrator" {
+  source     = "../modules/osipi/integrator"
+
+  project_id= var.project_id
+  region = var.region
+  zone =var.zone
+  network_self_link=google_compute_network.vpc.self_link
+  subnet_self_link=google_compute_subnetwork.subnet.self_link
+}
 
 # /******************************************
 # 	Pub/Sub
@@ -57,12 +74,10 @@ module "pubsub" {
   project_id = var.project_id
   name       = "osipi-topic"
   iam_roles = [
-    "roles/pubsub.viewer",
-    "roles/pubsub.subscriber"
+    "roles/pubsub.editor"
   ]
   iam_members = {
-    "roles/pubsub.viewer"     = ["group:foo@example.com"]
-    "roles/pubsub.subscriber" = ["user:user1@example.com"]
+    "roles/pubsub.editor" = [module.osipi_integrator.service_account_iam_email]
   }
 }
 
@@ -72,17 +87,16 @@ module "pubsub" {
 # 	Bigquery
 #  *****************************************/
 
-module "bigquery-dataset" {
+module "bigquery_dataset" {
   source     = "../modules/terraform/bigquery_dataset"
   project_id = var.project_id
   id          = "osipi-dataset"
   access_roles = {
-    reader = { role = "READER", type = "group_by_email" }
     owner        = { role = "OWNER", type = "user_by_email" }
+    bq_users        = {role = "special_group", type = "allAuthenticatedUsers"}
   }
   access_identities = {
-    reader = "playground-test@ludomagno.net"
-    owner  = "ludo@ludomagno.net"
+    owner  = module.osipi_integrator.service_account_email
   }
 
   options = {

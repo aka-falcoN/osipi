@@ -1,5 +1,5 @@
 /**
- * Copyright 2018 Google LLC
+ * Copyright 2020 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,41 +14,33 @@
  * limitations under the License.
  */
 
-output "topic" {
-  value       = length(google_pubsub_topic.topic) > 0 ? google_pubsub_topic.topic.0.name : ""
-  description = "The name of the Pub/Sub topic"
-}
-
-output "topic_labels" {
-  value       = length(google_pubsub_topic.topic) > 0 ? google_pubsub_topic.topic.0.labels : {}
-  description = "Labels assigned to the Pub/Sub topic"
-}
-
 output "id" {
-  value       = length(google_pubsub_topic.topic) > 0 ? google_pubsub_topic.topic.0.id : ""
-  description = "The ID of the Pub/Sub topic"
+  description = "Topic id."
+  value       = google_pubsub_topic.default.id
 }
 
-output "uri" {
-  value       = length(google_pubsub_topic.topic) > 0 ? "pubsub.googleapis.com/${google_pubsub_topic.topic.0.id}" : ""
-  description = "The URI of the Pub/Sub topic"
+output "subscriptions" {
+  description = "Subscription resources."
+  value       = google_pubsub_subscription.default
+  depends_on = [
+    google_pubsub_subscription_iam_binding.default
+  ]
 }
 
-output "subscription_names" {
-  value = concat(
-    google_pubsub_subscription.push_subscriptions.*.name,
-    google_pubsub_subscription.pull_subscriptions.*.name,
-  )
-
-  description = "The name list of Pub/Sub subscriptions"
+output "subscription_id" {
+  description = "Subscription ids."
+  value = {
+    for k, v in google_pubsub_subscription.default : k => v.id
+  }
+  depends_on = [
+    google_pubsub_subscription_iam_binding.default
+  ]
 }
 
-output "subscription_paths" {
-  value = concat(
-    google_pubsub_subscription.push_subscriptions.*.path,
-    google_pubsub_subscription.pull_subscriptions.*.path,
-  )
-
-  description = "The path list of Pub/Sub subscriptions"
+output "topic" {
+  description = "Topic resource."
+  value       = google_pubsub_topic.default
+  depends_on = [
+    google_pubsub_topic_iam_binding.default
+  ]
 }
-
