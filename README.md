@@ -26,12 +26,12 @@ Execution Steps:
     3. `terraform apply`- Apply the reviewed plan to create resources
 
 ToDo:
-1. Include CMEK encryptions
-2. Include OSI PI Installation
-3. Include configuration files
-4. Include configuring ini files
-5. Include Firewalls
-6. Include HA setup
-7. Include Active Directory & Domain Controller creation
-8. Include integration between components
-9. Include Automated bash script to switch between deployments
+
+1. Include OSI PI Installation
+2. Include configuration files
+3. Include configuring ini files
+4. Include Firewalls
+5. Include HA setup
+6. Include Active Directory & Domain Controller creation
+7. Include integration between components
+8. Include CMEK encryptions
