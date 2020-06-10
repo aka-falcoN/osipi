@@ -24,7 +24,7 @@ module "remote_state_bucket" {
 resource "google_compute_network" "vpc" {
   provider = google-beta
 
-  count = var.network == null ? 0 : 1
+  count = var.network == null ? 1 : 0
 
   name                    = "osipi-vpc"
   auto_create_subnetworks = false
@@ -39,7 +39,7 @@ resource "google_compute_network" "vpc" {
 resource "google_compute_subnetwork" "subnet" {
   provider = google-beta
 
-  count = var.subnet == null ? 0 : 1
+  count = var.subnet == null ? 1 : 0
 
   name                     = "osipi-subnet"
   project                  = var.project_id
@@ -84,7 +84,7 @@ module "pubsub" {
 module "bigquery_dataset" {
   source     = "../../modules/terraform/bigquery_dataset"
   project_id = var.project_id
-  id         = "osipi-dataset"
+  id         = "osipi_dataset"
   access_roles = {
     owner    = { role = "OWNER", type = "user_by_email" }
     bq_users = { role = "special_group", type = "allAuthenticatedUsers" }

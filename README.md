@@ -23,7 +23,7 @@ Execution Steps:
 4. Based on the selection, change the directory and execute below commands:
     1. `terraform init` - Initialize Terraform
     2. `terraform plan` - Review the Terraform plan output
-    3. `terraform apply`- Apply the reviewed plan to create resources
+    3. `terraform apply -var-file=terraform.tfvars`- Apply the reviewed plan to create resources
 
 ToDo:
 
