@@ -12,3 +12,15 @@ variable "zone" {
   description = "Location of the resources in project."
   type        = string
 }
+
+variable "network" {
+  description = "Existing network to deploy resources."
+  type        = string
+  default       = null
+}
+
+variable "subnet" {
+  description = "Existing subnet to deploy resources."
+  type        = string
+  default       = null
+}

@@ -1,5 +1,5 @@
 locals {
-    bucket_name = "osi-server-staging-gcs-${var.project_id}"
+  bucket_name = "osi-server-staging-gcs-${var.project_id}"
 }
 # /******************************************
 # 	IAM & Service Account
@@ -27,7 +27,7 @@ module "server_staging_bucket" {
   set_viewer_roles = true
   set_admin_roles  = false
 
-  bucket_viewers   = { "${local.bucket_name}" = module.osi_server_service_account.iam_email }
+  bucket_viewers = { "${local.bucket_name}" = module.osi_server_service_account.iam_email }
 }
 
 /******************************************
@@ -47,12 +47,12 @@ module "osipi_server_vm" {
     addresses  = null
   }]
   service_account = module.osi_server_service_account.email
-  instance_count = 1
+  instance_count  = 1
 
   boot_disk = {
-    image        = "projects/windows-cloud/global/images/windows-server-2012-r2-dc-v20200512"
-    type         = "pd-ssd"
-    size         = 200
+    image = "projects/windows-cloud/global/images/windows-server-2012-r2-dc-v20200512"
+    type  = "pd-ssd"
+    size  = 200
   }
 }
 
@@ -73,11 +73,11 @@ module "osipi_mssql_vm" {
     addresses  = null
   }]
   service_account = module.osi_server_service_account.email
-  instance_count = 1
+  instance_count  = 1
 
   boot_disk = {
-    image        = "projects/windows-sql-cloud/global/images/sql-2012-standard-windows-2012-r2-dc-v20200512"
-    type         = "pd-ssd"
-    size         = 200  //should change according to the topology
+    image = "projects/windows-sql-cloud/global/images/sql-2012-standard-windows-2012-r2-dc-v20200512"
+    type  = "pd-ssd"
+    size  = 200 //should change according to the topology
   }
 }

@@ -1,5 +1,5 @@
 locals {
-    bucket_name = "terraform-remote-state-${var.project_id}"
+  bucket_name = "terraform-remote-state-${var.project_id}"
 }
 
 /******************************************
@@ -46,11 +46,11 @@ resource "google_compute_subnetwork" "subnet" {
 }
 
 module "osipi_server" {
-  source     = "../../modules/osipi/server"
+  source = "../../modules/osipi/server"
 
-  project_id= var.project_id
-  region = var.region
-  zone =var.zone
-  network_self_link=google_compute_network.vpc.self_link
-  subnet_self_link=google_compute_subnetwork.subnet.self_link
+  project_id        = var.project_id
+  region            = var.region
+  zone              = var.zone
+  network_self_link = var.network == null ? google_compute_network.vpc.self_link : var.network
+  subnet_self_link  = var.subnet == null ? google_compute_subnetwork.subnet.self_link : var.subnet
 }

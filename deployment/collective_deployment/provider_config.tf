@@ -9,9 +9,9 @@ terraform {
   Provider credential configuration
  *****************************************/
 provider "google" {
-  version      = ">= 3.23.0"
+  version = ">= 3.23.0"
 }
 
 provider "google-beta" {
-  version      = ">= 3.23.0"
+  version = ">= 3.23.0"
 }

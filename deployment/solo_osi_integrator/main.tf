@@ -1,5 +1,5 @@
 locals {
-    bucket_name = "terraform-remote-state-${var.project_id}"
+  bucket_name = "terraform-remote-state-${var.project_id}"
 }
 
 /******************************************
@@ -46,13 +46,13 @@ resource "google_compute_subnetwork" "subnet" {
 }
 
 module "osipi_integrator" {
-  source     = "../../modules/osipi/integrator"
+  source = "../../modules/osipi/integrator"
 
-  project_id= var.project_id
-  region = var.region
-  zone =var.zone
-  network_self_link=google_compute_network.vpc.self_link
-  subnet_self_link=google_compute_subnetwork.subnet.self_link
+  project_id        = var.project_id
+  region            = var.region
+  zone              = var.zone
+  network_self_link = var.network == null ? google_compute_network.vpc.self_link : var.network
+  subnet_self_link  = var.subnet == null ? google_compute_subnetwork.subnet.self_link : var.subnet
 }
 
 # /******************************************
@@ -80,13 +80,13 @@ module "pubsub" {
 module "bigquery_dataset" {
   source     = "../../modules/terraform/bigquery_dataset"
   project_id = var.project_id
-  id          = "osipi-dataset"
+  id         = "osipi-dataset"
   access_roles = {
-    owner        = { role = "OWNER", type = "user_by_email" }
-    bq_users        = {role = "special_group", type = "allAuthenticatedUsers"}
+    owner    = { role = "OWNER", type = "user_by_email" }
+    bq_users = { role = "special_group", type = "allAuthenticatedUsers" }
   }
   access_identities = {
-    owner  = module.osipi_integrator.service_account_email
+    owner = module.osipi_integrator.service_account_email
   }
 
   options = {

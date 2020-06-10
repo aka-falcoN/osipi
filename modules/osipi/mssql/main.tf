@@ -15,11 +15,11 @@ module "osipi_mssql_vm" {
     addresses  = null
   }]
   service_account = var.service_account
-  instance_count = 1
+  instance_count  = 1
 
   boot_disk = {
-    image        = "projects/windows-sql-cloud/global/images/sql-2012-standard-windows-2012-r2-dc-v20200512"
-    type         = "pd-ssd"
-    size         = 200  //should change according to the topology
+    image = "projects/windows-sql-cloud/global/images/sql-2012-standard-windows-2012-r2-dc-v20200512"
+    type  = "pd-ssd"
+    size  = 200 //should change according to the topology
   }
 }
