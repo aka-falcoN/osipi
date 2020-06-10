@@ -24,6 +24,8 @@ module "remote_state_bucket" {
 resource "google_compute_network" "vpc" {
   provider = google-beta
 
+  count = var.network == null ? 0 : 1
+
   name                    = "osipi-vpc"
   auto_create_subnetworks = false
   routing_mode            = "REGIONAL"
@@ -37,9 +39,11 @@ resource "google_compute_network" "vpc" {
 resource "google_compute_subnetwork" "subnet" {
   provider = google-beta
 
+  count = var.subnet == null ? 0 : 1
+
   name                     = "osipi-subnet"
   project                  = var.project_id
-  network                  = google_compute_network.vpc.name
+  network                  = element(google_compute_network.vpc.*.name, 0)
   ip_cidr_range            = "10.0.1.0/24"
   private_ip_google_access = "true"
   region                   = var.region
@@ -51,8 +55,8 @@ module "osipi_server" {
   project_id        = var.project_id
   region            = var.region
   zone              = var.zone
-  network_self_link = var.network == null ? google_compute_network.vpc.self_link : var.network
-  subnet_self_link  = var.subnet == null ? google_compute_subnetwork.subnet.self_link : var.subnet
+  network_self_link = var.network == null ? element(google_compute_network.vpc.*.self_link, 0) : var.network
+  subnet_self_link  = var.subnet == null ? element(google_compute_subnetwork.subnet.*.self_link, 0) : var.subnet
 }
 
 module "osipi_integrator" {
@@ -61,8 +65,8 @@ module "osipi_integrator" {
   project_id        = var.project_id
   region            = var.region
   zone              = var.zone
-  network_self_link = var.network == null ? google_compute_network.vpc.self_link : var.network
-  subnet_self_link  = var.subnet == null ? google_compute_subnetwork.subnet.self_link : var.subnet
+  network_self_link = var.network == null ? element(google_compute_network.vpc.*.self_link, 0) : var.network
+  subnet_self_link  = var.subnet == null ? element(google_compute_subnetwork.subnet.*.self_link, 0) : var.subnet
 }
 
 # /******************************************

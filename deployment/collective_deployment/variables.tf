@@ -16,11 +16,11 @@ variable "zone" {
 variable "network" {
   description = "Existing network to deploy resources."
   type        = string
-  default       = null
+  default     = null
 }
 
 variable "subnet" {
   description = "Existing subnet to deploy resources."
   type        = string
-  default       = null
+  default     = null
 }
