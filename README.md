@@ -9,7 +9,7 @@ Execution Steps:
     gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
     ```
 2. Select the deployment model to execute under ~/osipi/deployment, there are three deployment model to select:
-    1. Solor Server- Provisions resources required for OSI PI Server
+    1. Solo Server- Provisions resources required for OSI PI Server
     2. Solo Integrator- Provisions resources required for OSI PI Integrator
     3. Collective Deployment- Provisions OSI PI Server, and Integrator both
 
