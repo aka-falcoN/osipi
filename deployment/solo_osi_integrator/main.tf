@@ -6,7 +6,7 @@ locals {
 	Terraform remote state Bucket
  *****************************************/
 module "remote_state_bucket" {
-  source = "../modules/terraform/gcs"
+  source = "../../modules/terraform/gcs"
 
   project_id       = var.project_id
   prefix           = ""
@@ -45,18 +45,8 @@ resource "google_compute_subnetwork" "subnet" {
   region                   = var.region
 }
 
-module "osipi_server" {
-  source     = "../modules/osipi/server"
-
-  project_id= var.project_id
-  region = var.region
-  zone =var.zone
-  network_self_link=google_compute_network.vpc.self_link
-  subnet_self_link=google_compute_subnetwork.subnet.self_link
-}
-
 module "osipi_integrator" {
-  source     = "../modules/osipi/integrator"
+  source     = "../../modules/osipi/integrator"
 
   project_id= var.project_id
   region = var.region
@@ -70,7 +60,7 @@ module "osipi_integrator" {
 #  *****************************************/
 
 module "pubsub" {
-  source     = "../modules/terraform/pubsub"
+  source     = "../../modules/terraform/pubsub"
   project_id = var.project_id
   name       = "osipi-topic"
   iam_roles = [
@@ -88,7 +78,7 @@ module "pubsub" {
 #  *****************************************/
 
 module "bigquery_dataset" {
-  source     = "../modules/terraform/bigquery_dataset"
+  source     = "../../modules/terraform/bigquery_dataset"
   project_id = var.project_id
   id          = "osipi-dataset"
   access_roles = {
