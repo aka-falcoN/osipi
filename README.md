@@ -17,9 +17,9 @@ Execution Steps:
     1. `project_id` - Project ID for the deployment
     2. `region` - Region for the deployment
     3. `zone` - Zone for the deployment
-    4. `network` - Provide an existing network name to use, default value `null` will provision a new resource
-    5. `subnet` - Provide an existing subnet name to use, default value `null` will provision a new resource
-    
+    4. `network` - default value `null` will provision a new resource, to use an existing network, provide the network name
+    5. `subnet` - default value `null` will provision a new resource, to use an existing subnet, provide the subnet name
+
 4. Based on the selection, change the directory and execute below commands:
     1. `terraform init` - Initialize Terraform
     2. `terraform plan` - Review the Terraform plan output
