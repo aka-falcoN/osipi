@@ -35,3 +35,6 @@ ToDo:
 6. Include Active Directory & Domain Controller creation
 7. Include integration between components
 8. Include CMEK encryptions
+
+APIs used: 
+Managed Microsoft AD, Cloud DNS, Compute Engine, PubSub, GCS, Bigquery,KMS

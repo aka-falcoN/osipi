@@ -24,3 +24,8 @@ variable "subnet" {
   type        = string
   default     = null
 }
+
+variable "ad_fqdn" {
+  description = "Active Director Fully Qualified Domain name"
+  type        = string
+}

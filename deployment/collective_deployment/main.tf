@@ -1,5 +1,9 @@
 locals {
   bucket_name = "terraform-remote-state-${var.project_id}"
+  network = var.network == null ? element(google_compute_network.vpc.*.self_link, 0) : var.network
+  subnet  = var.subnet == null ? element(google_compute_subnetwork.subnet.*.self_link, 0) : var.subnet
+
+  network_name = split("/", local.network)[9]
 }
 
 /******************************************
@@ -17,6 +21,28 @@ module "remote_state_bucket" {
   set_admin_roles  = false
   versioning       = { "${local.bucket_name}" = true }
 }
+
+# /******************************************
+# 	Google managed MS Active Directory
+#  *****************************************/
+
+# resource "null_resource" "create_active_directory" {
+#   triggers = {
+#     project_id = var.project_id
+#   }
+#   provisioner "local-exec" {
+#     command = "gcloud active-directory domains create ${var.ad_fqdn} --reserved-ip-range='172.16.0.0/24' --region=${var.region} --authorized-networks=osipi-vpc --project=${var.project_id}"
+#   }
+# }
+
+# resource "null_resource" "delete_active_directory" {
+#   triggers = {
+#     project_id = var.project_id
+#   }
+#   provisioner "local-exec" {
+#     command = "gcloud active-directory domains create --project=${var.project_id} ${var.ad_fqdn} --reserved-ip-range='172.16.0.0/24' --region=${var.region} --authorized-networks=${local.network_name}"
+#   }
+# }
 
 # /******************************************
 # 	VPC configuration
@@ -43,7 +69,7 @@ resource "google_compute_subnetwork" "subnet" {
 
   name                     = "osipi-subnet"
   project                  = var.project_id
-  network                  = element(google_compute_network.vpc.*.name, 0)
+  network                  = local.network_name
   ip_cidr_range            = "10.0.1.0/24"
   private_ip_google_access = "true"
   region                   = var.region
@@ -55,8 +81,8 @@ module "osipi_server" {
   project_id        = var.project_id
   region            = var.region
   zone              = var.zone
-  network_self_link = var.network == null ? element(google_compute_network.vpc.*.self_link, 0) : var.network
-  subnet_self_link  = var.subnet == null ? element(google_compute_subnetwork.subnet.*.self_link, 0) : var.subnet
+  network_self_link = local.network
+  subnet_self_link  = local.subnet
 }
 
 module "osipi_integrator" {
@@ -65,8 +91,8 @@ module "osipi_integrator" {
   project_id        = var.project_id
   region            = var.region
   zone              = var.zone
-  network_self_link = var.network == null ? element(google_compute_network.vpc.*.self_link, 0) : var.network
-  subnet_self_link  = var.subnet == null ? element(google_compute_subnetwork.subnet.*.self_link, 0) : var.subnet
+  network_self_link = local.network
+  subnet_self_link  = local.subnet
 }
 
 # /******************************************
