@@ -4,6 +4,7 @@ locals {
   subnet  = var.subnet == null ? element(google_compute_subnetwork.subnet.*.self_link, 0) : var.subnet
 
   network_name = split("/", local.network)[9]
+  network_link = "projects/${var.project_id}/regional/networks/${local.network_name}"
 }
 
 /******************************************
@@ -26,21 +27,21 @@ module "remote_state_bucket" {
 # 	Google managed MS Active Directory
 #  *****************************************/
 
-# resource "null_resource" "create_active_directory" {
-#   triggers = {
-#     project_id = var.project_id
-#   }
-#   provisioner "local-exec" {
-#     command = "gcloud active-directory domains create ${var.ad_fqdn} --reserved-ip-range='172.16.0.0/24' --region=${var.region} --authorized-networks=osipi-vpc --project=${var.project_id}"
-#   }
-# }
+resource "null_resource" "create_active_directory" {
+  triggers = {
+    project_id = var.project_id
+  }
+  provisioner "local-exec" {
+    command = "gcloud active-directory domains create ${var.ad_fqdn} --reserved-ip-range='172.16.0.0/24' --region=${var.region} --authorized-networks=${local.network_link} --project=${var.project_id}"
+  }
+}
 
 # resource "null_resource" "delete_active_directory" {
 #   triggers = {
 #     project_id = var.project_id
 #   }
 #   provisioner "local-exec" {
-#     command = "gcloud active-directory domains create --project=${var.project_id} ${var.ad_fqdn} --reserved-ip-range='172.16.0.0/24' --region=${var.region} --authorized-networks=${local.network_name}"
+#     command = "gcloud active-directory domains delete ${var.ad_fqdn} --reserved-ip-range='172.16.0.0/24' --region=${var.region} --authorized-networks=${local.network_name} --project=${var.project_id}"
 #   }
 # }
 
