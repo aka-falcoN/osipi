@@ -1,0 +1,337 @@
+Prerequisite:
+
+#Create SQL User in AD:
+
+$Domain = "osipi.quantiphi-sumeet.com"
+$ServiceAccountName = "sql_service"
+$ServiceAccountPrincipalName = "$ServiceAccountName@$Domain"
+
+New-ADUser -Name $ServiceAccountName `
+    -Server $ADControllerFQDN `
+    -SamAccountName $ServiceAccountName `
+    -UserPrincipalName $ServiceAccountPrincipalName `
+    -AccountPassword (Read-Host -AsSecureString "AccountPassword") `
+    -PassThru | Enable-ADAccount
+
+################################################### Instance 1 #####################################################3
+gcloud compute instances create mssql-primary \
+    --machine-type n2-standard-2	 \
+    --boot-disk-type pd-ssd \
+    --boot-disk-size 100GB \
+    --image-project windows-sql-cloud \
+    --image-family sql-ent-2016-win-2016 \
+    --zone us-central1-a \
+    --network-interface=network=osipi,subnet=osipi-subzero,private-network-ip=10.0.0.2,aliases=10.0.0.4/31
+
+gcloud compute reset-windows-password mssql-primary --zone us-central1-a  --quiet
+
+Add-Computer -DomainName osipi.quantiphi-sumeet.com -Credential (Get-Credential "osipi\setupadmin")
+
+netsh advfirewall firewall add rule name="5022 for Avail Groups" dir=in action=allow protocol=TCP localport=5022
+netsh advfirewall firewall add rule name="1433 for SQL Server" dir=in action=allow protocol=TCP localport=1433
+
+Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+
+Restart-Computer
+
+$node1 = "mssql-primary"
+$node2 = "mssql-secondary"
+
+$nameWSFC = "osipi-dbcluster"
+$ipWSFC1 = "10.0.0.4"
+$ipWSFC2 = "10.1.0.6"
+$ipWSListener1 = "10.0.0.5"
+$ipWSListener2 = "10.1.0.7"
+
+#Check if Primary SQL connects
+
+$SQLServer1IsReady=$False
+For ($i=0; $i -le 30; $i++) {
+    $SqlCatalog = "master"
+    $SqlConnection = New-Object System.Data.SqlClient.SqlConnection
+    $SqlConnection.ConnectionString = "Server = $node1;" + `
+         "Database = $SqlCatalog; Integrated Security = True"
+    try {
+        $SqlConnection.Open()
+        Write-Host "Connection to the server $node1 was successful"
+        $SQLServer1IsReady=$True
+        $SqlConnection.Close()
+        break
+    }
+    catch {
+        Write-Host "SQL server $node1 is not ready, waiting for 60s"
+        Start-Sleep -s 60 #Wait for 60 seconds
+    }
+}
+if($SQLServer1IsReady -eq $False) {
+    Write-Error "$node1 is not responding. Was it deployed correctly?"
+}
+
+#Check if Secondary SQL connects
+
+$SQLServer2IsReady=$False
+For ($i=0; $i -le 30; $i++) {
+    $SqlCatalog = "master"
+    $SqlConnection = New-Object System.Data.SqlClient.SqlConnection
+    $SqlConnection.ConnectionString = "Server = $node2;" + `
+        "Database = $SqlCatalog; Integrated Security = True"
+    try {
+        $SqlConnection.Open()
+        Write-Host "Connection to the server $node2 was successful"
+        $SQLServer2IsReady=$True
+        $SqlConnection.Close()
+        break
+    }
+    catch {
+        Write-Host "SQL server $node2 is not ready, waiting for 60s"
+        Start-Sleep -s 60 #Wait for 60 seconds
+    }
+}
+if($SQLServer2IsReady -eq $False) {
+    Write-Error "$node2 is not responding. Was it deployed correctly?"
+}
+
+New-Cluster -Name $nameWSFC -Node $node1, $node2 -NoStorage `
+    -StaticAddress $ipWSFC1, $ipWSFC2
+
+#Enable the Always On availability groups feature on both nodes
+
+Enable-SqlAlwaysOn -ServerInstance $node1 -Force
+Enable-SqlAlwaysOn -ServerInstance $node2 -Force
+
+#Create folders for the database data and log files:
+New-Item -ItemType directory -Path C:\SQLData
+New-Item -ItemType directory -Path C:\SQLLog
+
+
+########## Database creation, might not need in OSIPI steps ###########
+
+#create a database:
+$CreateDatabaseSQLScript =  @"
+CREATE DATABASE osipi ON PRIMARY
+    (NAME = 'osipi_Data', FILENAME='C:\SQLData\osipi_data.mdf', SIZE =
+256MB, MAXSIZE = UNLIMITED, FILEGROWTH = 256MB )
+    LOG ON (NAME = 'osipi_log', FILENAME='C:\SQLLog\osipi_log.ldf',
+SIZE = 256MB, MAXSIZE = UNLIMITED, FILEGROWTH = 256MB )
+GO
+USE [osipi]
+Exec dbo.sp_changedbowner @loginame = 'sa', @map = false;
+ALTER DATABASE [osipi] SET RECOVERY FULL;
+GO
+BACKUP DATABASE osipi to disk =
+'\\mssql-secondary\SQLBackup\osipi.bak' WITH INIT
+GO
+"@
+Invoke-Sqlcmd -Query $CreateDatabaseSQLScript -ServerInstance $node1
+
+#Run the following SQL statement to create a table:
+$CreateTableSQLScript =  @"
+USE [osipi]
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE TABLE [dbo].[osipi_table] (
+            [Id] [bigint] IDENTITY(1,1) NOT NULL,
+            [Title] [nvarchar](max) NOT NULL,
+            [Author] [nvarchar](max) NULL,
+            [PublishedDate] [datetime] NULL,
+            [ImageUrl] [nvarchar](max) NULL,
+            [Description] [nvarchar](max) NULL,
+            [CreatedById] [nvarchar](max) NULL,
+CONSTRAINT [PK_dbo.Books] PRIMARY KEY CLUSTERED
+    ([Id] ASC) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF,
+IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+"@
+Invoke-Sqlcmd -Query $CreateTableSQLScript -ServerInstance $node1
+
+#Set Variables:
+$Domain = "osipi.quantiphi-sumeet.com"
+$ServiceAccountName = "sql_service"
+$ServiceAccountPrincipalName = "$ServiceAccountName@$Domain"
+
+Add-WindowsFeature RSAT-AD-PowerShell
+
+#Run the following SQL statement to add the osipi\sql_service account as a database administrator:
+
+$AddSQLServiceAccountScript =  @"
+USE [master]
+GO
+    CREATE LOGIN [osipi\sql_service] FROM WINDOWS WITH
+DEFAULT_DATABASE=[osipi], DEFAULT_LANGUAGE=[us_english]
+GO
+USE [osipi]
+GO
+CREATE USER [osipi\sql_service] FOR LOGIN [osipi\sql_service]
+GO
+USE [osipi]
+GO
+ALTER ROLE [db_accessadmin] ADD MEMBER [osipi\sql_service]
+GO
+USE [osipi]
+GO
+ALTER ROLE [db_backupoperator] ADD MEMBER [osipi\sql_service]
+GO
+USE [osipi]
+GO
+ALTER ROLE [db_datareader] ADD MEMBER [osipi\sql_service]
+GO
+USE [osipi]
+GO
+ALTER ROLE [db_datawriter] ADD MEMBER [osipi\sql_service]
+GO
+USE [osipi]
+GO
+ALTER ROLE [db_ddladmin] ADD MEMBER [osipi\sql_service]
+GO
+USE [osipi]
+GO
+ALTER ROLE [db_owner] ADD MEMBER [osipi\sql_service]
+GO
+USE [osipi]
+GO
+ALTER ROLE [db_securityadmin] ADD MEMBER [osipi\sql_service]
+GO
+"@
+Invoke-Sqlcmd -Query $AddSQLServiceAccountScript -ServerInstance $node1
+
+
+############ Set up the SQL Server availability group #############
+
+$Database="osipi"
+$BackupFolder="SQLBackup"
+$SharedLocation="\\$node2\$BackupFolder"
+$ListenerName="sql-listener"
+$AGName="MainAG"
+$PrimaryServer = "$node1.$Domain\MSSQLSERVER"
+$SecondaryServer = "$node2.$Domain\MSSQLSERVER"
+
+#Back up the database on the primary server:
+Backup-SqlDatabase `
+    -Database $Database -Initialize `
+    -BackupFile "$SharedLocation\$Database.bak" `
+    -ServerInstance $node1
+
+#Restore the database on the secondary server:
+Restore-SqlDatabase `
+    -Database $Database `
+    -BackupFile "$SharedLocation\$Database.bak" `
+    -ServerInstance $node2 `
+    -NORECOVERY
+
+#Back up the database log on the primary server:
+Backup-SqlDatabase `
+    -Database $Database -Initialize `
+    -BackupFile "$SharedLocation\$Database.log" `
+    -ServerInstance $node1 `
+    -BackupAction Log
+
+#Restore the database log on the secondary server:
+Restore-SqlDatabase `
+    -Database $Database `
+    -BackupFile "$SharedLocation\$Database.log" `
+    -ServerInstance $node2 `
+    -RestoreAction Log `
+    -NORECOVERY
+
+#Create and then start the endpoints:
+$endpoint1=New-SqlHADREndpoint -Port 5022 -Owner sa `
+    -Encryption Supported -EncryptionAlgorithm Aes `
+    -Name AlwaysonEndpoint1 `
+    -Path "SQLSERVER:\SQL\$node1.$Domain\Default"
+Set-SqlHADREndpoint -InputObject $endpoint1 -State Started
+$endpoint2=New-SqlHADREndpoint -Port 5022 -Owner sa `
+    -Encryption Supported -EncryptionAlgorithm Aes `
+    -Name AlwaysonEndpoint2 `
+    -Path "SQLSERVER:\SQL\$node2.$Domain\Default"
+Set-SqlHADREndpoint -InputObject $endpoint2 -State Started
+
+#Verify the configuration by running the following commands in PowerShell:
+$node1 = "mssql-primary"
+$node2 = "mssql-secondary"
+Invoke-Sqlcmd -Query "select name, state_desc, port FROM sys.tcp_endpoints" -ServerInstance $node1
+Invoke-Sqlcmd -Query "select name, state_desc, port FROM sys.tcp_endpoints" -ServerInstance $node2
+
+#Set the endpoint URLs:
+$EndpointUrlSQLServer1="TCP://" + $node1 + "." + $Domain + ":5022"
+$EndpointUrlSQLServer2="TCP://" + $node2 + "." + $Domain + ":5022"
+
+#Create an in-memory representation of the replicas:
+$PrimaryReplica = New-SqlAvailabilityReplica -Name $node1 `
+    -EndpointUrl $EndpointUrlSQLServer1 `
+    -FailoverMode "Automatic" `
+    -AvailabilityMode "SynchronousCommit" `
+    -AsTemplate -Version 13
+$SecondaryReplica = New-SqlAvailabilityReplica -Name $node2 `
+    -EndpointUrl $EndpointUrlSQLServer2 `
+    -FailoverMode "Automatic" `
+    -AvailabilityMode "SynchronousCommit" `
+    -AsTemplate -Version 13
+
+#Create the availability group:
+New-SqlAvailabilityGroup -Name $AGName `
+    -AvailabilityReplica @($PrimaryReplica, $SecondaryReplica) `
+    -Path "SQLSERVER:\SQL\$node1.$Domain\Default" `
+    -Database $Database
+
+#Join the secondary instance to the availability group:
+Join-SqlAvailabilityGroup -Path "SQLSERVER:\SQL\$node2\Default" -Name $AGName
+
+#Join the secondary database to the availability group:
+Add-SqlAvailabilityDatabase `
+    -Path "SQLSERVER:\SQL\$node2\Default\AvailabilityGroups\$AGName" `
+    -Database $Database
+
+#Create the listener:
+New-SqlAvailabilityGroupListener -Name $ListenerName `
+    -Port 1433 `
+    -StaticIp @("$ipWSListener1/255.255.255.0","$ipWSListener2/255.255.255.0") `
+    -Path SQLSERVER:\Sql\$node1\Default\AvailabilityGroups\$AGName
+
+#Remove the shared folder, which is no longer needed:
+For ($i=0; $i -le 30; $i++) {
+    try {
+        Remove-Item \\$node2\c$\$BackupFolder -Force -Recurse -ErrorAction Stop
+        Write-Host "Shared folder $SharedLocation was removed"
+        break
+    }
+    catch {
+        Write-Host "\\$node2\c$\$BackupFolder is in use waiting 1m to retry"
+        Start-Sleep -s 60
+    }
+}
+
+################################################### Instance 2 #####################################################3
+gcloud compute instances create mssql-secondary \
+    --machine-type n2-standard-2 \
+    --boot-disk-type pd-ssd \
+    --boot-disk-size 100GB \
+    --image-project windows-sql-cloud \
+    --image-family sql-ent-2016-win-2016 \
+    --zone us-central1-b \
+    --network-interface=network=osipi,subnet=osipi-subone,private-network-ip=10.1.0.3,aliases=10.1.0.6/31
+
+gcloud compute reset-windows-password mssql-secondary \
+    --zone us-central1-b --quiet
+
+Add-Computer -DomainName osipi.quantiphi-sumeet.com -Credential (Get-Credential "osipi\setupadmin")
+
+netsh advfirewall firewall add rule name="5022 for Avail Groups" dir=in action=allow protocol=TCP localport=5022
+netsh advfirewall firewall add rule name="1433 for SQL Server" dir=in action=allow protocol=TCP localport=1433
+
+Install-WindowsFeature Failover-Clustering -IncludeManagementTools
+
+Restart-Computer
+
+#Login with Domain Admin user- setupadmin
+
+#create the folders for your SQL Server data and log files:
+New-Item -ItemType directory -Path C:\SQLData
+New-Item -ItemType directory -Path C:\SQLLog
+
+#Create a new folder for database backups and share it:
+New-Item -ItemType directory -Path C:\SQLBackup
+New-SMBShare -Name SQLBackup -Path C:\SQLBackup -FullAccess "Authenticated Users"

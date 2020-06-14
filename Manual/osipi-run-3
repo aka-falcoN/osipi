@@ -1,0 +1,194 @@
+################################################### Instance 1- Primary #####################################################
+
+###################### Provision VM ######################
+gcloud compute instances create mssql-primary \
+    --zone "us-central1-a" \
+    --machine-type "n1-standard-2" \
+    --subnet "osipi-subzero" \
+    --private-network-ip "10.0.0.4" \
+    --can-ip-forward \
+    --image-family "sql-ent-2016-win-2016" \
+    --image-project "windows-sql-cloud" \
+    --boot-disk-size "50" \
+    --boot-disk-type "pd-ssd" \
+    --boot-disk-device-name "mssql-primary" \
+    --create-disk=name=mssql-primary-datadisk-1,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=mssql-primary-datadisk-2,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=mssql-primary-datadisk-3,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=mssql-primary-datadisk-4,size=50,type=pd-ssd,auto-delete=no \
+    --metadata enable-wsfc=true,sysprep-specialize-script-ps1="Install-WindowsFeature Failover-Clustering -IncludeManagementTools;"
+
+gcloud compute reset-windows-password mssql-primary --zone us-central1-a  --quiet
+
+gcloud compute firewall-rules create allow-internal-ports-private-sql \
+    --network osipi \
+    --allow tcp:0-65535,udp:0-65535,icmp \
+    --source-ranges 10.0.0.0/18,10.1.0.0/18
+
+###################### Add Domain ######################
+
+netsh advfirewall firewall add rule name="Open port for Health Check" dir=in action=allow protocol=TCP localport=59997
+netsh advfirewall firewall add rule name="Open SQL Server port" dir=in action=allow protocol=TCP localport=1433
+
+Add-Computer -DomainName osipi.quantiphi-sumeet.com -Restart -Force -Credential osipi\setupadmin
+
+###################### Configure Quorom and ClusterS2D ######################
+New-Cluster -Name windows-fci -Node mssql-primary, mssql-secondary -StaticAddress 10.0.0.201 -NoStorage
+
+Set-ClusterQuorum -FileShareWitness \\dc-windows\QWitness
+
+Test-Cluster
+
+#You can also launch the Cluster Admin GUI to review the cluster's health by running cluadmin.msc.
+Enable-ClusterS2D
+
+#Because S2D requires 2GB per volume for management, and there are four 50GB volumes per node, define the storage pool and set its size to 192GB.
+New-Volume -StoragePoolFriendlyName S2D* -FriendlyName VDisk01 -FileSystem CSVFS_REFS -Size 192GB
+
+#Verify that the storage volume exists in read/write mode.
+dir C:\ClusterStorage\Volume1\ | Get-ACL
+
+`````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````
+###################### Reinstall MSSQL- FCI ######################
+
+#Remove the default SQL Server instance from the first node. You will replace it later with a new FCI configuration. [3 minutes]
+C:\sql_server_install\Setup.exe /Action=Uninstall /FEATURES=SQL,AS,IS,RS /INSTANCENAME=MSSQLSERVER /Q
+
+#Create a FCI configuration file, it embeds AD SQL user(sql_service) and password, store it in C:\fci_install_master_node.ini
+
+#Install the SQL Server using the configuration file.
+C:\sql_server_install\Setup.exe /CONFIGURATIONFILE=C:\fci_install_master_node.ini
+
+Restart-Computer
+
+###################### Configure healthcheck ######################
+
+$cluster_network_name = 'Cluster Network 1'
+$ip_resource_name = 'SQL IP Address 1 (SQL2016FCI)'
+$load_balancer_ip = '10.0.0.200'
+[int]$health_check_port = 59997
+Get-ClusterResource $ip_resource_name |
+  Set-ClusterParameter -Multiple @{ 'Address'=$load_balancer_ip;
+                                    'ProbePort'=$health_check_port;
+                                    'SubnetMask'='255.255.255.255';
+                                    'Network'=$cluster_network_name;
+                                    'EnableDhcp'=0; }
+#Restart the cluster resource:
+Stop-ClusterResource $ip_resource_name;
+Start-ClusterResource $ip_resource_name
+
+#Restart the cluster group:
+Stop-ClusterGroup "SQL Server (MSSQLSERVER)";
+Start-ClusterGroup "SQL Server (MSSQLSERVER)";
+
+################################################### Instance 2- Witness #####################################################
+
+gcloud compute instances create mssql-witness \
+    --machine-type n1-standard-1	 \
+    --boot-disk-type pd-ssd \
+    --boot-disk-size 100GB \
+    --image-project windows-cloud \
+    --image-family windows-2019 \
+    --zone us-central1-a \
+    --network-interface=network=osipi,subnet=osipi-subzero,private-network-ip=10.0.0.6
+
+gcloud compute reset-windows-password mssql-wintess --zone us-central1-a  --quiet
+
+Add-Computer -DomainName osipi.quantiphi-sumeet.com -Restart -Force -Credential osipi\setupadmin
+
+New-Item "C:\QWitness" –type directory
+New-SmbShare -Name "QWitness" -Path "C:\QWitness" -Description "SQL File Share Witness" -FullAccess osipi\setupadmin,  osipi\mssql-primary", osipi\mssql-secondary
+
+dir \\dc-windows\QWitness
+
+################################################### Instance 3- Secondary #####################################################
+
+gcloud compute instances create mssql-secondary \
+    --zone "us-central1-b" \
+    --machine-type "n1-standard-2" \
+    --subnet "osipi-subone" \
+    --private-network-ip "10.1.0.4" \
+    --can-ip-forward \
+    --image-family "sql-ent-2016-win-2016" \
+    --image-project "windows-sql-cloud" \
+    --boot-disk-size "50" \
+    --boot-disk-type "pd-ssd" \
+    --boot-disk-device-name "mssql-secondary" \
+    --create-disk=name=mssql-secondary-datadisk-1,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=mssql-secondary-datadisk-2,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=mssql-secondary-datadisk-3,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=mssql-secondary-datadisk-4,size=50,type=pd-ssd,auto-delete=no \
+    --metadata enable-wsfc=true,sysprep-specialize-script-ps1="Install-WindowsFeature Failover-Clustering -IncludeManagementTools;"
+  
+gcloud compute reset-windows-password mssql-secondary --zone us-central1-b  --quiet
+
+netsh advfirewall firewall add rule name="Open port for Health Check" dir=in action=allow protocol=TCP localport=59997
+netsh advfirewall firewall add rule name="Open SQL Server port" dir=in action=allow protocol=TCP localport=1433
+
+Add-Computer -DomainName osipi.quantiphi-sumeet.com -Restart -Force -Credential osipi\setupadmin
+
+`````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````````
+###################### Reinstall MSSQL- FCI ######################
+
+#Remove the default SQL Server instance from the first node. You will replace it later with a new FCI configuration. [3 minutes]
+C:\sql_server_install\Setup.exe /Action=Uninstall /FEATURES=SQL,AS,IS,RS /INSTANCENAME=MSSQLSERVER /Q
+
+#Create a FCI configuration file, it embeds failover ip, AD SQL user(sql_service) and password, store it in C:\fci_add_node.ini
+
+#Install the SQL Server using the configuration file.
+C:\sql_server_install\Setup.exe /CONFIGURATIONFILE=C:\fci_add_node.ini
+
+Restart-Computer
+
+################################################### ILB #####################################################
+#If the active node goes down, then the SQL FCI failover node activates. The health checker receives the signal, and traffic is redirected there
+
+#Create two instance groups, and add one SQL Server node to each group. These instance groups act as backends that the load balancer can direct traffic to.
+
+gcloud compute instance-groups unmanaged create wsfc-group-a --zone us-central1-a
+gcloud compute instance-groups unmanaged add-instances wsfc-group-a --instances mssql-primary --zone us-central1-a
+
+gcloud compute instance-groups unmanaged create wsfc-group-b --zone us-central1-b
+gcloud compute instance-groups unmanaged add-instances wsfc-group-b --instances mssql-secondary --zone us-central1-b
+
+#Create a health check that the load balancer can use to determine which is the active node.
+gcloud compute health-checks create tcp sql-healthcheck \
+    --check-interval="2s" \
+    --healthy-threshold=1 \
+    --unhealthy-threshold=2 \
+    --port=59997 \
+    --request=10.0.0.200 \
+    --timeout="1s"
+
+#Add a firewall rule to allow the health check.
+gcloud compute firewall-rules create allow-health-check \
+    --network osipi \
+    --source-ranges 130.211.0.0/22,35.191.0.0/16 \
+    --allow tcp
+
+#Create one backend service and add the two backend instance groups.
+gcloud compute backend-services create wsfcbackend \
+    --load-balancing-scheme internal \
+    --region us-central1 \
+    --health-checks sql-healthcheck \
+    --protocol tcp
+
+gcloud compute backend-services add-backend wsfcbackend \
+    --instance-group wsfc-group-a \
+    --instance-group-zone us-central1-a \
+    --region us-central1
+
+gcloud compute backend-services add-backend wsfcbackend \
+    --instance-group wsfc-group-b \
+    --instance-group-zone us-central1-b \
+    --region us-central1
+
+#Create an internal load balancer to forward requests to the active node in the SQL FCI
+gcloud compute forwarding-rules create wsfc-forwarding-rule-primary \
+    --load-balancing-scheme internal \
+    --ports 1433 \
+    --network osipi \
+    --subnet osipi-subzero \
+    --region us-central1 \
+    --backend-service wsfcbackend \
+    --address 10.0.0.200
