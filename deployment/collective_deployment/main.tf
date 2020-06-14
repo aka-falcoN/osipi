@@ -59,24 +59,9 @@ resource "google_compute_subnetwork" "subnet" {
 # 	GCP managed MS Active Directory
 #  *****************************************/
 
-resource "null_resource" "create_active_directory" {
-  triggers = {
-    project_id = var.project_id
-  }
-  provisioner "local-exec" {
-    on_failure = "continue"
-    command << EOF    
-      gcloud active-directory domains create ${var.ad_fqdn} --reserved-ip-range='172.16.0.0/24' --region=${var.region} --authorized-networks=${local.network_link} --project=${var.project_id} &
-      sleep 65m \
-      && gcloud active-directory domains reset-managed-identities-admin-password ${var.ad_fqdn} --quiet --project=${var.project_id} > ad_secret
-    EOF
-  }
-}
-
-data "local_file" "ad_secret" {
-    filename = "./ad_secret"
-
-    depends_on=[null_resource.create_active_directory]
+resource "random_password" "init_ad_secret" {
+  length  = 16
+  special = true
 }
 
 module "active_directory_secret" {
@@ -86,7 +71,24 @@ module "active_directory_secret" {
   secret_id             = "active_directory_secret"
   automatic_replication = "true"
   secretAccessor        = [module.osipi_server.service_account_iam_email, module.osipi_integrator.service_account_iam_email]
-  secret_data = data.local_file.ad_secret.content
+  secret_data = random_password.init_ad_secret.result
+}
+
+resource "null_resource" "create_active_directory" {
+  triggers = {
+    project_id = var.project_id
+  }
+  provisioner "local-exec" {
+    on_failure = "continue"
+    command << EOF    
+      gcloud active-directory domains create ${var.ad_fqdn} --reserved-ip-range='172.16.0.0/24' --region=${var.region} --authorized-networks=${local.network_link} --project=${var.project_id} &
+      sleep 65m \
+      && gcloud active-directory domains reset-managed-identities-admin-password ${var.ad_fqdn} --quiet --project=${var.project_id} > ad_secret_staging \
+      && tr -d '\n' < ad_secret_staging > ad_secret \
+      && cat ./ad_secret | gcloud secrets versions --project ${var.project_id} add "active_directory_secret" --data-file=-
+    EOF
+  }
+  depends_on=[module.active_directory_secret]
 }
 
 resource "null_resource" "delete_active_directory" {
