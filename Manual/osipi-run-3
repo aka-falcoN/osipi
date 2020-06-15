@@ -1,3 +1,10 @@
+Informative:
+Two WSFC nodes with attached S2D storage
+node-1: 10.0.0.4
+node-2: 10.0.0.5
+Windows Server Failover Cluster (for cluster management): 10.0.0.201
+Internal load balancer and SQL FCI listener (for SQL connections): 10.0.0.200
+
 ################################################### Instance 1- Primary #####################################################
 
 ###################### Provision VM ######################
@@ -33,14 +40,19 @@ netsh advfirewall firewall add rule name="Open SQL Server port" dir=in action=al
 Add-Computer -DomainName osipi.quantiphi-sumeet.com -Restart -Force -Credential osipi\setupadmin
 
 ###################### Configure Quorom and ClusterS2D ######################
-New-Cluster -Name windows-fci -Node mssql-primary, mssql-secondary -StaticAddress 10.0.0.201 -NoStorage
+````````````````````````````````````Execute MSSQL Witness first```````````````````````````````````````````````````````````````
 
-Set-ClusterQuorum -FileShareWitness \\dc-windows\QWitness
+New-Cluster -Name windows-fci -Node mssql-primary, mssql-secondary -StaticAddress 10.0.0.201 -NoStorage (I faced dns mapping issue, shouldnt be the case)
+
+Set-ClusterQuorum -FileShareWitness \\mssql-witness\QWitness
 
 Test-Cluster
 
 #You can also launch the Cluster Admin GUI to review the cluster's health by running cluadmin.msc.
+
 Enable-ClusterS2D
+Enable-ClusterS2D -CacheDeviceModel "EphemeralDisk"
+(Get-Cluster).BlockCacheSize = 2048
 
 #Because S2D requires 2GB per volume for management, and there are four 50GB volumes per node, define the storage pool and set its size to 192GB.
 New-Volume -StoragePoolFriendlyName S2D* -FriendlyName VDisk01 -FileSystem CSVFS_REFS -Size 192GB
@@ -92,14 +104,13 @@ gcloud compute instances create mssql-witness \
     --zone us-central1-a \
     --network-interface=network=osipi,subnet=osipi-subzero,private-network-ip=10.0.0.6
 
-gcloud compute reset-windows-password mssql-wintess --zone us-central1-a  --quiet
+gcloud compute reset-windows-password mssql-witness --zone us-central1-a  --quiet
 
 Add-Computer -DomainName osipi.quantiphi-sumeet.com -Restart -Force -Credential osipi\setupadmin
 
 New-Item "C:\QWitness" –type directory
-New-SmbShare -Name "QWitness" -Path "C:\QWitness" -Description "SQL File Share Witness" -FullAccess osipi\setupadmin,  osipi\mssql-primary", osipi\mssql-secondary
-
-dir \\dc-windows\QWitness
+New-SmbShare -Name "QWitness" -Path "C:\QWitness" -Description "SQL File Share Witness" -FullAccess osipi\setupadmin, "mssql-primary$", "mssql-secondary$"
+dir \\mssql-witness\QWitness
 
 ################################################### Instance 3- Secondary #####################################################
 

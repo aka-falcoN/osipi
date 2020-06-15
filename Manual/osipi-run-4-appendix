@@ -1,0 +1,39 @@
+gcloud compute instances create "node-7" \
+    --zone "us-central1-c" \
+    --machine-type "n1-standard-2" \
+    --subnet "wsfc-subnet1" \
+    --private-network-ip "10.0.0.4" \
+    --can-ip-forward \
+    --image-family "sql-ent-2016-win-2016" \
+    --image-project "windows-sql-cloud" \
+    --boot-disk-size "50" \
+    --boot-disk-type "pd-ssd" \
+    --boot-disk-device-name "node-7" \
+    --create-disk=name=node-7-datadisk-1,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=node-7-datadisk-2,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=node-7-datadisk-3,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=node-7-datadisk-4,size=50,type=pd-ssd,auto-delete=no \
+    --metadata enable-wsfc=true,sysprep-specialize-script-ps1="Install-WindowsFeature Failover-Clustering -IncludeManagementTools;"
+
+gcloud compute instances create "node-8" \
+    --zone "us-central1-b" \
+    --machine-type "n1-standard-2" \
+    --subnet "wsfc-subnet1" \
+    --private-network-ip "10.0.0.5" \
+    --can-ip-forward \
+    --image-family "sql-ent-2016-win-2016" \
+    --image-project "windows-sql-cloud" \
+    --boot-disk-size "50" \
+    --boot-disk-type "pd-ssd" \
+    --boot-disk-device-name "node-8" \
+    --create-disk=name=node-8-datadisk-1,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=node-8-datadisk-2,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=node-8-datadisk-3,size=50,type=pd-ssd,auto-delete=no \
+    --create-disk=name=node-8-datadisk-4,size=50,type=pd-ssd,auto-delete=no \
+    --metadata enable-wsfc=true,sysprep-specialize-script-ps1="Install-WindowsFeature Failover-Clustering -IncludeManagementTools;"
+
+gcloud compute instance-groups unmanaged add-instances wsfc-group-c --instances node-7 --zone us-central1-c
+gcloud compute instance-groups unmanaged add-instances wsfc-group-b --instances node-8 --zone us-central1-b
+
+
+New-Cluster -Name windows-fci -Node node-7, node-8 -StaticAddress 10.0.0.201 -NoStorage

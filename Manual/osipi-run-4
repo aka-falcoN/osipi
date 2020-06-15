@@ -1,0 +1,123 @@
+$DomainName = "gcp.quantiphi.com";
+Add-Computer -DomainName gcp.quantiphi.com -Restart -Force -Credential gcp.quantiphi.com\setupadmin
+
+setupadmingcp.quantiphi.com
+
+Steps:
+Create managed AD 
+Create Private DNS zone
+Create AD management VM with metadata to install AD cmdlets:
+  --metadata="sysprep-specialize-script-ps1=Install-WindowsFeature -Name RSAT-AD-Tools;Install-WindowsFeature -Name GPMC;Install-WindowsFeature -Name RSAT-DNS-Server"
+
+Add to Domain:
+Add-Computer -DomainName gcp.quantiphi.com -Restart -Force -Credential gcp.quantiphi.com\setupadmin
+
+Create sql_service user
+Add sql_service user to 'Cloud Service Administrators' AD group and add it in 'Cloud Domain Join Account' with Full control
+
+Create a folder for Witness:
+New-Item "C:\QWitness" –type directory
+
+Create SMB share:
+New-SmbShare -Name "QWitness" -Path "C:\QWitness" -Description "SQL File Share Witness" -FullAccess "gcp.quantiphi.com\setupadmin", "gcp.quantiphi.com\node-1$", "gcp.quantiphi.com\node-2$"
+
+Verify:
+dir \\dc-windows\QWitness
+
+Create mssql-primary, mssql-secondary instances with below metadata, each machine should have four pd-ssd
+    --metadata enable-wsfc=true,sysprep-specialize-script-ps1="Install-WindowsFeature Failover-Clustering -IncludeManagementTools;"
+
+Add each machine to Domain
+
+Create MIG for each mssql node:
+gcloud compute instance-groups unmanaged create wsfc-group-c --zone us-central1-c
+gcloud compute instance-groups unmanaged add-instances wsfc-group-c --instances node-1 --zone us-central1-c
+gcloud compute instance-groups unmanaged create wsfc-group-b --zone us-central1-b
+gcloud compute instance-groups unmanaged add-instances wsfc-group-b --instances node-2 --zone us-central1-b
+
+gcloud compute health-checks create tcp sql-healthcheck \
+    --check-interval="2s" \
+    --healthy-threshold=1 \
+    --unhealthy-threshold=2 \
+    --port=59997 \
+    --request=10.0.0.200 \
+    --timeout="1s"
+
+gcloud compute firewall-rules create allow-health-check \
+    --network wsfcnet \
+    --source-ranges 130.211.0.0/22,35.191.0.0/16 \
+    --allow tcp
+
+gcloud compute backend-services create wsfcbackend \
+    --load-balancing-scheme internal \
+    --region us-central1 \
+    --health-checks sql-healthcheck \
+    --protocol tcp
+
+gcloud compute backend-services add-backend wsfcbackend \
+    --instance-group wsfc-group-b \
+    --instance-group-zone us-central1-b \
+    --region us-central1
+
+gcloud compute backend-services add-backend wsfcbackend \
+    --instance-group wsfc-group-c \
+    --instance-group-zone us-central1-c \
+    --region us-central1
+
+gcloud compute forwarding-rules create wsfc-forwarding-rule \
+    --load-balancing-scheme internal \
+    --ports 1433 \
+    --network wsfcnet \
+    --subnet wsfc-subnet1 \
+    --region us-central1 \
+    --backend-service wsfcbackend \
+    --address 10.0.0.200
+
+Create failover in node1:
+New-Cluster -Name windows-fci -Node node-1, node-2 -StaticAddress 10.0.0.201 -NoStorage
+
+Grant full control to node-1, node-2 and windows-fci to computer objects under AD User and Computer
+
+***********Additionally adding VCO and CNO to 'Cloud Service Administrators' AD group allowed it to add nodes in AD***************
+
+Create Quorom in node1:
+Set-ClusterQuorum -FileShareWitness \\dc-windows\QWitness
+Test-Cluster
+
+Create Cluster2SD:
+Enable-ClusterS2D
+Enable-ClusterS2D -CacheDeviceModel "EphemeralDisk"
+(Get-Cluster).BlockCacheSize = 2048
+New-Volume -StoragePoolFriendlyName S2D* -FriendlyName VDisk01 -FileSystem CSVFS_REFS -Size 192GB
+dir C:\ClusterStorage\Volume1\ | Get-ACL
+
+Uninstall default SQL from node 1 and node 2:
+C:\sql_server_install\Setup.exe /Action=Uninstall /FEATURES=SQL,AS,IS,RS /INSTANCENAME=MSSQLSERVER /Q
+shutdown /r
+
+Add sql_service user creds and copy fci_install_master_node.ini file to node1 C:\
+Add sql_service user creds and copy fci_add_node.ini file to node2 C:\
+
+Install mssql in node1:
+C:\sql_server_install\Setup.exe /CONFIGURATIONFILE=C:\fci_install_master_node.ini
+
+Install mssql in node2:
+C:\sql_server_install\Setup.exe /CONFIGURATIONFILE=C:\fci_add_node.ini
+
+Configure healthcheck in node1:
+$cluster_network_name = 'Cluster Network 1'
+$ip_resource_name = 'SQL IP Address 1 (SQL2016FCI)'
+$load_balancer_ip = '10.0.0.200'
+[int]$health_check_port = 59997
+Get-ClusterResource $ip_resource_name |
+  Set-ClusterParameter -Multiple @{ 'Address'=$load_balancer_ip;
+                                    'ProbePort'=$health_check_port;
+                                    'SubnetMask'='255.255.255.255';
+                                    'Network'=$cluster_network_name;
+                                    'EnableDhcp'=0; }
+
+Stop-ClusterResource $ip_resource_name;
+Start-ClusterResource $ip_resource_name
+
+Stop-ClusterGroup "SQL Server (MSSQLSERVER)";
+Start-ClusterGroup "SQL Server (MSSQLSERVER)";
